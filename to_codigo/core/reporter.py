@@ -263,7 +263,11 @@ class XLSXReporter(Reporter):
         for row_idx, info in enumerate(files, 2):
             row_data = _file_to_row(info, audit=audit)
             for col, value in enumerate(row_data, 1):
-                ws.cell(row=row_idx, column=col, value=value)
+                if value is None:
+                    value = ""
+                cell = ws.cell(row=row_idx, column=col, value=value)
+                if isinstance(value, str) and value.startswith("="):
+                    cell.data_type = "s"
 
         last_data_row = len(files) + 1
 
@@ -283,6 +287,7 @@ class XLSXReporter(Reporter):
                 type="list",
                 formula1='"Si,No"',
                 allow_blank=True,
+                showDropDown=False,
             )
             dv.add(f"{audit_letter}2:{audit_letter}{last_data_row}")
             ws.add_data_validation(dv)
@@ -356,7 +361,7 @@ class XLSXReporter(Reporter):
         if audit and audit_stats:
             a = audit_stats
             audit_start = summary_header_row + len(stats) + 3
-            audit_title = ws.cell(row=audit_start, column=1, value="=== Resumen de Auditoria ===")
+            audit_title = ws.cell(row=audit_start, column=1, value="Resumen de Auditoria")
             audit_title.font = Font(bold=True, size=13, color="2D6A4F")
 
             audit_rows = [
