@@ -46,3 +46,4 @@ reporte.*
 
 # Logs
 *.log
+.to-codigo-audit.json
