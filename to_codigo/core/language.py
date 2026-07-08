@@ -1,10 +1,12 @@
 """Language detection and comment-syntax configuration.
 
 Provides:
+- ``BINARY_EXTENSIONS``: set of extensions that are always binary (skip entirely).
 - ``EXTENSION_MAP``: file-extension to language-name lookup.
+- ``FILENAME_MAP``: special-filename to language-name lookup (dotfiles like .gitignore).
 - ``LanguageConfig``: frozen dataclass describing comment syntax per language.
 - ``LANGUAGE_CONFIGS``: registry mapping language names to their configs.
-- ``detect_language()``: detects language from extension, falling back to shebang.
+- ``detect_language()``: detects language from filename, extension, or shebang.
 """
 
 from __future__ import annotations
@@ -18,6 +20,27 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Extension to language mapping
 # ---------------------------------------------------------------------------
+
+BINARY_EXTENSIONS: set[str] = {
+    # Images
+    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp', '.avif', '.tiff', '.tif',
+    '.psd', '.ai', '.sketch',
+    # Fonts
+    '.woff', '.woff2', '.ttf', '.otf', '.eot',
+    # Audio/Video
+    '.mp3', '.mp4', '.wav', '.flac', '.ogg', '.webm', '.avi', '.mov', '.m4a', '.aac',
+    # Archives
+    '.zip', '.tar', '.gz', '.bz2', '.7z', '.rar', '.xz',
+    # Binaries
+    '.exe', '.dll', '.so', '.dylib', '.bin', '.dat', '.pack', '.idx',
+    # Documents
+    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+    # Other binary
+    '.class', '.jar', '.pyc', '.pyo', '.pyd', '.o', '.obj', '.a', '.lib',
+    '.wasm', '.node',
+    # System
+    '.ds_store', '.db', '.sqlite', '.sqlite3',
+}
 
 EXTENSION_MAP: dict[str, str] = {
     ".py":   "Python",
@@ -64,6 +87,36 @@ EXTENSION_MAP: dict[str, str] = {
     ".dart": "Dart",
     ".ex":   "Elixir",
     ".exs":  "Elixir",
+    # --- New text extensions (commonly found in frontend projects) ---
+    ".svg":      "SVG",
+    ".vue":      "Vue",
+    ".svelte":   "Svelte",
+    ".graphql":  "GraphQL",
+    ".gql":      "GraphQL",
+    ".ps1":      "PowerShell",
+    ".bat":      "Batch",
+    ".cmd":      "Batch",
+    ".ini":      "INI",
+    ".toml":     "TOML",
+    ".conf":     "Config",
+    ".cfg":      "Config",
+    ".properties": "Properties",
+    ".lock":     "Lock File",
+    ".map":      "Source Map",
+    ".log":      "Log",
+    ".csv":      "CSV Data",
+    ".tsv":      "TSV Data",
+}
+
+FILENAME_MAP: dict[str, str] = {
+    ".gitignore":    "Gitignore",
+    ".dockerignore": "Dockerignore",
+    ".npmrc":        "NPM Config",
+    ".editorconfig": "EditorConfig",
+    ".env":          "Env File",
+    ".htaccess":     "Apache Config",
+    "dockerfile":    "Dockerfile",
+    "makefile":      "Makefile",
 }
 
 # ---------------------------------------------------------------------------
@@ -161,6 +214,17 @@ LANGUAGE_CONFIGS: dict[str, LanguageConfig] = {
     "JSON":        _cfg("JSON"),
     "Markdown":    _cfg("Markdown"),
     "Texto Plano": _cfg("Texto Plano"),
+
+    # --- New languages ---
+    "Vue":         _cfg("Vue", line_comments=("//",), block_comment_pairs=_C_STYLE),
+    "Svelte":      _cfg("Svelte", line_comments=("//",), block_comment_pairs=_C_STYLE),
+    "GraphQL":     _cfg("GraphQL", line_comments=("#",)),
+    "PowerShell":  _cfg("PowerShell", line_comments=("#",)),
+    "TOML":        _cfg("TOML", line_comments=("#",)),
+    "Properties":  _cfg("Properties", line_comments=("#",)),
+    "INI":         _cfg("INI", line_comments=(";",)),
+    "Config":      _cfg("Config", line_comments=("#",)),
+    "SVG":         _cfg("SVG", block_comment_pairs=(("<!--", "-->"),)),
 }
 
 
@@ -177,9 +241,11 @@ def detect_language(filepath: str) -> str:
     """Detect the programming language of a file.
 
     Strategy:
-    1. Check the file extension against ``EXTENSION_MAP``.
-    2. If no match, inspect the shebang (``#!``) line for interpreter hints.
-    3. Fall back to ``'Texto Plano'``.
+    1. Check the full filename (lowercased) against ``FILENAME_MAP``
+       (handles dotfiles like ``.gitignore``, ``Dockerfile``, etc.).
+    2. Check the file extension against ``EXTENSION_MAP``.
+    3. If no match, inspect the shebang (``#!``) line for interpreter hints.
+    4. Fall back to ``'Texto Plano'``.
 
     Args:
         filepath: Absolute or relative path to the file.
@@ -187,6 +253,10 @@ def detect_language(filepath: str) -> str:
     Returns:
         The detected language name.
     """
+    filename = os.path.basename(filepath).lower()
+    if filename in FILENAME_MAP:
+        return FILENAME_MAP[filename]
+
     ext = os.path.splitext(filepath)[1].lower()
     if ext in EXTENSION_MAP:
         return EXTENSION_MAP[ext]

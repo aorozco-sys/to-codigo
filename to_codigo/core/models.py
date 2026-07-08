@@ -102,3 +102,20 @@ class LanguageStats:
         self.total_fixmes += info.fixmes
         self.total_hacks += info.hacks
         self.total_notes += info.notes
+
+
+@dataclass
+class ScanResult:
+    """Aggregate result of a directory scan.
+
+    Attributes:
+        files: List of ``FileInfo`` for all processed (text) files.
+        stats: Per-language statistics dict.
+        skipped_binary: Count of binary files that were skipped.
+        skipped_errors: Count of files skipped due to errors.
+    """
+
+    files: list[FileInfo]
+    stats: dict[str, "LanguageStats"]
+    skipped_binary: int = 0
+    skipped_errors: int = 0

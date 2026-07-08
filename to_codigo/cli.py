@@ -82,6 +82,7 @@ def show_results_table(
     total_files: int,
     elapsed: float,
     console: Console | None = None,
+    skipped_binary: int = 0,
 ) -> None:
     """Render a Rich table with per-language results.
 
@@ -92,6 +93,7 @@ def show_results_table(
         stats: Dict mapping language name to LanguageStats.
         total_files: Total number of files scanned.
         elapsed: Elapsed time in seconds.
+        skipped_binary: Number of binary files skipped during scan.
     """
     c = console or Console()
 
@@ -154,7 +156,7 @@ def show_results_table(
 
     # Summary line below the table.
     c.print()
-    c.print(
+    summary_parts = [
         f"  [bold green]Total:[/] {total_files} archivos  "
         f"[green]{total_code:,}[/] codigo  "
         f"[yellow]{total_comment:,}[/] comentarios  "
@@ -163,7 +165,12 @@ def show_results_table(
         f"[yellow]{total_todos}[/] TODOs  "
         f"[red]{total_fixmes}[/] FIXMEs  "
         f"[cyan]{elapsed:.2f}s[/]"
-    )
+    ]
+    if skipped_binary > 0:
+        summary_parts.append(
+            f"\n  [dim italic]{skipped_binary} archivos binarios omitidos[/]"
+        )
+    c.print("".join(summary_parts))
     c.print()
 
 

@@ -16,9 +16,10 @@ markers in comments using language-aware regex patterns.
 from __future__ import annotations
 
 import logging
+import os
 import re
 
-from to_codigo.core.language import get_language_config
+from to_codigo.core.language import get_language_config, BINARY_EXTENSIONS
 from to_codigo.core.models import TodoItem
 
 logger = logging.getLogger(__name__)
@@ -92,11 +93,52 @@ def scan_markers(filepath: str, language: str) -> list[TodoItem]:
 
 
 # ---------------------------------------------------------------------------
+# Binary detection
+# ---------------------------------------------------------------------------
+
+def is_binary_file(filepath: str, sample_size: int = 8192) -> bool:
+    """Detect if a file is binary by checking for null bytes in the first chunk.
+
+    Uses a two-stage heuristic inspired by git's binary detection:
+    1. If a NUL byte (``\\x00``) is found, the file is binary.
+    2. If more than 30 % of the sampled bytes are non-text, the file is binary.
+
+    Args:
+        filepath: Path to the file to check.
+        sample_size: Number of bytes to read for the heuristic (default 8 KiB).
+
+    Returns:
+        ``True`` if the file appears to be binary, ``False`` otherwise.
+        Returns ``True`` on read errors (safer to skip than to crash).
+    """
+    try:
+        with open(filepath, "rb") as f:
+            chunk = f.read(sample_size)
+    except (OSError, IOError):
+        return True
+
+    if not chunk:
+        return False
+
+    if b"\x00" in chunk:
+        return True
+
+    text_chars = bytes(range(32, 127)) + b"\n\r\t\f\b"
+    non_text = sum(1 for b in chunk if b not in text_chars)
+    if non_text / len(chunk) > 0.30:
+        return True
+
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Line counting
 # ---------------------------------------------------------------------------
 
 def count_lines(filepath: str, language: str) -> tuple[int, int, int, int]:
     """Count lines in a file, classifying each as code, comment, or blank.
+
+    Binary files (known extensions or null-byte detected) return ``(0, 0, 0, 0)``.
 
     Args:
         filepath: Path to the source file.
@@ -105,6 +147,16 @@ def count_lines(filepath: str, language: str) -> tuple[int, int, int, int]:
     Returns:
         A 4-tuple ``(total_lines, code_lines, comment_lines, blank_lines)``.
     """
+    # --- Binary guard: known binary extensions ---
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext in BINARY_EXTENSIONS:
+        return 0, 0, 0, 0
+
+    # --- Binary guard: content-based heuristic for unknown extensions ---
+    if language == "Texto Plano":
+        if is_binary_file(filepath):
+            return 0, 0, 0, 0
+
     config = get_language_config(language)
 
     total = code = comment = blank = 0

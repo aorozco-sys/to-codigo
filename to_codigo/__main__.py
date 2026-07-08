@@ -37,7 +37,7 @@ from to_codigo.cli import (
 )
 from to_codigo.assets.banner import VERSION
 from to_codigo.core.scanner import scan_directory, compute_stats, _collect_files, _load_gitignore
-from to_codigo.core.scanner import DEFAULT_EXCLUDE_DIRS, _process_file
+from to_codigo.core.scanner import DEFAULT_EXCLUDE_DIRS, _process_file, is_binary_path
 from to_codigo.core.reporter import REPORTERS
 from to_codigo.core.differ import diff_reports
 from to_codigo.core.models import FileInfo
@@ -229,6 +229,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Mostrar warnings de archivos omitidos",
     )
     parser.add_argument(
+        "--count-binary",
+        action="store_true",
+        default=False,
+        help="Contar archivos binarios (sin lineas) en lugar de omitirlos",
+    )
+    parser.add_argument(
         "--no-banner",
         action="store_true",
         help="Omitir el banner de inicio",
@@ -342,6 +348,7 @@ def main(argv: list[str] | None = None) -> int:
 
     results: list[FileInfo] = []
     all_todos = []
+    skipped_binary = 0
 
     with create_progress_bar() as progress:
         task = progress.add_task(
@@ -350,6 +357,25 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         for fpath in file_list:
+            # --- Binary detection ---
+            if is_binary_path(fpath):
+                if args.count_binary:
+                    info, todos = _process_file(
+                        (fpath, args.ruta_raiz),
+                        collect_todos=collect_todos,
+                        count_binary=True,
+                    )
+                    if info is not None:
+                        results.append(info)
+                        if collect_todos:
+                            all_todos.extend(todos)
+                else:
+                    skipped_binary += 1
+                    if args.verbose:
+                        console.print(f"  [dim]Binario omitido: {fpath}[/]")
+                progress.advance(task)
+                continue
+
             info, todos = _process_file(
                 (fpath, args.ruta_raiz),
                 collect_todos=collect_todos,
@@ -372,7 +398,7 @@ def main(argv: list[str] | None = None) -> int:
     stats = compute_stats(results)
 
     # --- Results table ---
-    show_results_table(stats, len(results), elapsed, console)
+    show_results_table(stats, len(results), elapsed, console, skipped_binary=skipped_binary)
 
     # --- Top files ---
     if args.top > 0:

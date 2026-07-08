@@ -17,8 +17,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Optional
 
 from to_codigo.core.models import FileInfo, LanguageStats, TodoItem
-from to_codigo.core.language import detect_language, EXTENSION_MAP
-from to_codigo.core.counter import count_lines, scan_markers
+from to_codigo.core.language import detect_language, EXTENSION_MAP, BINARY_EXTENSIONS, FILENAME_MAP
+from to_codigo.core.counter import count_lines, scan_markers, is_binary_file
 
 logger = logging.getLogger(__name__)
 
@@ -121,13 +121,36 @@ def _collect_files(
 # Worker (module-level for picklability with ProcessPoolExecutor)
 # ---------------------------------------------------------------------------
 
+def is_binary_path(filepath: str) -> bool:
+    """Quickly determine if *filepath* points to a binary file.
+
+    Checks the extension against ``BINARY_EXTENSIONS`` first (fast path),
+    then falls back to a null-byte content check for unknown extensions.
+
+    Args:
+        filepath: Absolute or relative path to the file.
+
+    Returns:
+        ``True`` if the file is binary, ``False`` otherwise.
+    """
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext in BINARY_EXTENSIONS:
+        return True
+    if ext not in EXTENSION_MAP:
+        filename_lower = os.path.basename(filepath).lower()
+        if filename_lower not in FILENAME_MAP:
+            return is_binary_file(filepath)
+    return False
+
+
 def _process_file(
     args: tuple[str, str],
     collect_todos: bool = True,
+    count_binary: bool = False,
 ) -> tuple[Optional[FileInfo], list[TodoItem]]:
     """Process a single file and return a ``(FileInfo, list[TodoItem])`` tuple.
 
-    Returns ``(None, [])`` on error.
+    Returns ``(None, [])`` on error or when a binary file is skipped.
 
     This function must remain at module level so that ``ProcessPoolExecutor``
     can pickle it.
@@ -135,14 +158,35 @@ def _process_file(
     Args:
         args: A ``(abs_path, root)`` tuple.
         collect_todos: If ``True``, scan for TODO/FIXME/HACK/NOTE markers.
+        count_binary: If ``True``, create a ``FileInfo`` with language
+            ``"Binary Files"`` (0 lines, correct size) instead of skipping.
     """
     abs_path, root = args
     try:
         filename = os.path.basename(abs_path)
         dir_path = os.path.dirname(abs_path)
         relative_path = os.path.relpath(dir_path, root) if dir_path != root else "."
-        language = detect_language(abs_path)
         size, modified_at = _get_file_info(abs_path)
+
+        # --- Binary detection ---
+        if is_binary_path(abs_path):
+            if count_binary:
+                return FileInfo(
+                    absolute_path=abs_path,
+                    relative_path=relative_path,
+                    filename=filename,
+                    language="Binary Files",
+                    size_bytes=size,
+                    modified_at=modified_at,
+                    total_lines=0,
+                    code_lines=0,
+                    comment_lines=0,
+                    blank_lines=0,
+                ), []
+            logger.debug("Skipping binary file: %s", abs_path)
+            return None, []
+
+        language = detect_language(abs_path)
         total, code, comment, blank = count_lines(abs_path, language)
 
         if collect_todos:
@@ -201,6 +245,7 @@ def scan_directory(
     respect_gitignore: bool = False,
     max_workers: int | None = None,
     collect_todos: bool = False,
+    count_binary: bool = False,
 ) -> tuple[list[FileInfo], list[TodoItem]]:
     """Scan *root* and return a tuple of ``(FileInfo list, TodoItem list)``.
 
@@ -214,6 +259,9 @@ def scan_directory(
         max_workers: Number of parallel worker processes (default: CPU count).
         collect_todos: If ``True``, scan each file for TODO/FIXME/HACK/NOTE
             markers and populate ``FileInfo`` todo fields.
+        count_binary: If ``True``, binary files get a ``FileInfo`` entry with
+            language ``"Binary Files"`` (0 lines, correct size) instead of
+            being skipped silently.
 
     Returns:
         A tuple ``(results, all_todos)`` where *results* is a list of
@@ -253,7 +301,7 @@ def scan_directory(
     try:
         with ProcessPoolExecutor(max_workers=max_workers) as pool:
             futures = {
-                pool.submit(_process_file, task, collect_todos): task
+                pool.submit(_process_file, task, collect_todos, count_binary): task
                 for task in tasks
             }
             for future in as_completed(futures):
@@ -265,7 +313,7 @@ def scan_directory(
     except Exception as e:
         logger.error("Parallel processing failed, falling back to serial: %s", e)
         for task in tasks:
-            info, todos = _process_file(task, collect_todos=collect_todos)
+            info, todos = _process_file(task, collect_todos=collect_todos, count_binary=count_binary)
             if info is not None:
                 results.append(info)
                 if collect_todos:
