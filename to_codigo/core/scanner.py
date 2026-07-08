@@ -86,7 +86,7 @@ def _collect_files(
             # Mutate dirnames in-place to prune excluded directories.
             dirnames[:] = [d for d in dirnames if d not in exclude_dirs]
             for fname in filenames:
-                abs_path = os.path.join(dirpath, fname)
+                abs_path = os.path.abspath(os.path.join(dirpath, fname))
                 rel_path = os.path.relpath(abs_path, root)
                 if gitignore_patterns and _is_ignored(rel_path, gitignore_patterns):
                     continue
@@ -100,7 +100,7 @@ def _collect_files(
                         rel_path = os.path.relpath(entry.path, root)
                         if gitignore_patterns and _is_ignored(rel_path, gitignore_patterns):
                             continue
-                        files.append(entry.path)
+                        files.append(os.path.abspath(entry.path))
         except OSError as e:
             logger.warning("Cannot scan %s: %s", root, e)
 

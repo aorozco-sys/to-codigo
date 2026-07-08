@@ -575,3 +575,219 @@ def test_audit_diff_determine_status():
     assert diff.determine_status("/tmp/a.py") == "Auditado"
     assert diff.determine_status("/tmp/b.py") == "Modificado"
     assert diff.determine_status("/tmp/unknown.py") == "Nuevo"
+
+
+# ---------------------------------------------------------------------------
+# Full real-world roundtrip: actual files → scan → XLSX → edit XLSX → re-scan
+# ---------------------------------------------------------------------------
+
+def test_full_roundtrip_real_files(tmp_path):
+    """End-to-end roundtrip using real files, openpyxl edits, and re-scans.
+
+    Covers: first scan → mark → second scan → modify file → third scan →
+    add file → fourth scan.
+    """
+    import os
+    import time
+    from openpyxl import load_workbook
+    from to_codigo.core.scanner import _collect_files, _process_file, DEFAULT_EXCLUDE_DIRS
+
+    project = tmp_path / "project"
+    project.mkdir()
+
+    # Create 5 source files.
+    for i in range(5):
+        (project / f"file{i}.py").write_text(f"# file {i}\nprint({i})\n")
+
+    output = str(tmp_path / "report.xlsx")
+
+    def _scan():
+        files = _collect_files(
+            root=str(project),
+            exclude_dirs=set(DEFAULT_EXCLUDE_DIRS),
+            exclude_exts=set(),
+            include_exts=set(),
+            recursive=True,
+            gitignore_patterns=[],
+        )
+        results = []
+        for fpath in files:
+            info, _ = _process_file((fpath, str(project)), collect_todos=False)
+            if info:
+                results.append(info)
+        return results
+
+    # --- First scan: all "Nuevo" ---
+    files1 = _scan()
+    from to_codigo.core.scanner import compute_stats
+    stats = compute_stats(files1)
+    diff1 = compare_files(files1, {})
+    updated1 = apply_audit_to_files(files1, diff1)
+    audit_stats1 = calculate_audit_stats(updated1, diff1)
+    XLSXReporter().generate(updated1, stats, output, audit_state=True, audit_stats=audit_stats1)
+
+    assert diff1.new_files == 5
+    assert diff1.audited_unchanged == 0
+
+    # --- Mark first 3 files as "Si" in the XLSX ---
+    wb = load_workbook(output)
+    ws = wb.active
+    for row in range(2, 5):
+        ws.cell(row=row, column=13, value="Si")
+    wb.save(output)
+    wb.close()
+
+    # --- Second scan: 3 audited, 2 pending ---
+    files2 = _scan()
+    prev2 = read_previous_report(output)
+    assert len(prev2) == 5, f"Expected 5 entries in previous data, got {len(prev2)}"
+
+    diff2 = compare_files(files2, prev2)
+    updated2 = apply_audit_to_files(files2, diff2)
+
+    assert diff2.audited_unchanged == 3, f"Expected 3 audited_unchanged, got {diff2.audited_unchanged}"
+    assert diff2.pending_unchanged == 2
+    assert diff2.new_files == 0
+    assert diff2.audited_modified == 0
+
+    audited_files = [f for f in updated2 if f.audit_status == "Auditado"]
+    assert len(audited_files) == 3
+    for f in audited_files:
+        assert f.audit_marked == "Si"
+
+    # --- Modify one of the AUDITED files ---
+    time.sleep(1)
+    target = audited_files[0]
+    target_path = target.absolute_path
+    with open(target_path, "w") as fh:
+        fh.write("# modified\nprint('changed')\nx = 999\n")
+
+    # --- Third scan: 2 audited, 1 modified, 2 pending ---
+    files3 = _scan()
+    prev3 = read_previous_report(output)
+    diff3 = compare_files(files3, prev3)
+    updated3 = apply_audit_to_files(files3, diff3)
+
+    assert diff3.audited_unchanged == 2, f"Expected 2 audited_unchanged, got {diff3.audited_unchanged}"
+    assert diff3.audited_modified >= 1, f"Expected at least 1 modified, got {diff3.audited_modified}"
+
+    modified = [f for f in updated3 if f.audit_status == "Modificado"]
+    assert len(modified) == 1
+    assert modified[0].audit_marked == "No"
+    assert modified[0].filename == target.filename
+
+    # --- Add a new file ---
+    (project / "new_file.py").write_text("z = 42\n")
+
+    # --- Fourth scan: 2 audited, 1 modified, 2 pending, 1 new ---
+    files4 = _scan()
+    prev4 = read_previous_report(output)
+    diff4 = compare_files(files4, prev4)
+    updated4 = apply_audit_to_files(files4, diff4)
+
+    assert diff4.audited_unchanged == 2
+    assert diff4.new_files >= 1, f"Expected at least 1 new file, got {diff4.new_files}"
+
+    new = [f for f in updated4 if f.audit_status == "Nuevo"]
+    assert len(new) == 1
+    assert new[0].filename == "new_file.py"
+
+
+def test_relative_path_roundtrip(tmp_path):
+    """Bug fix: scanning with a relative path (not starting with ./ or /).
+
+    Previously, paths like ``myproject/file.py`` were stored in the XLSX but
+    rejected by the reader's path-format filter, causing all marks to be lost.
+    """
+    import os
+    from openpyxl import load_workbook
+    from to_codigo.core.scanner import _collect_files, _process_file, DEFAULT_EXCLUDE_DIRS
+
+    project = tmp_path / "relproj"
+    project.mkdir()
+    (project / "a.py").write_text("a = 1\n")
+    (project / "b.py").write_text("b = 2\n")
+
+    output = str(tmp_path / "relreport.xlsx")
+
+    # Simulate scanning from within tmp_path using a relative directory name.
+    orig_cwd = os.getcwd()
+    try:
+        os.chdir(str(tmp_path))
+        files = _collect_files(
+            root="relproj",
+            exclude_dirs=set(DEFAULT_EXCLUDE_DIRS),
+            exclude_exts=set(),
+            include_exts=set(),
+            recursive=True,
+            gitignore_patterns=[],
+        )
+    finally:
+        os.chdir(orig_cwd)
+
+    assert len(files) == 2
+
+    # All paths must be absolute (the bug was that they weren't).
+    for fpath in files:
+        assert os.path.isabs(fpath), f"Path should be absolute: {fpath}"
+
+    # Generate XLSX.
+    results = []
+    for fpath in files:
+        info, _ = _process_file((fpath, str(project)), collect_todos=False)
+        if info:
+            results.append(info)
+
+    from to_codigo.core.scanner import compute_stats
+    stats = compute_stats(results)
+    diff = compare_files(results, {})
+    updated = apply_audit_to_files(results, diff)
+    audit_stats = calculate_audit_stats(updated, diff)
+    XLSXReporter().generate(updated, stats, output, audit_state=True, audit_stats=audit_stats)
+
+    # Mark all as "Si".
+    wb = load_workbook(output)
+    ws = wb.active
+    for row in range(2, 4):
+        ws.cell(row=row, column=13, value="Si")
+    wb.save(output)
+    wb.close()
+
+    # Read back — should detect the marks.
+    prev = read_previous_report(output)
+    assert len(prev) == 2, f"Expected 2 entries, got {len(prev)}"
+    for path, data in prev.items():
+        assert data["audited"] == "Si", f"Expected 'Si' for {path}, got '{data['audited']}'"
+
+    diff2 = compare_files(results, prev)
+    assert diff2.audited_unchanged == 2, f"Expected 2 audited_unchanged, got {diff2.audited_unchanged}"
+
+
+def test_xlsx_reader_skips_summary_rows(tmp_path):
+    """The XLSX reader must not parse summary rows as file data."""
+    from openpyxl import load_workbook
+
+    files = [
+        _make_fileinfo("/tmp/a.py", loc=100, size=100, mtime="2025-01-01 00:00:00"),
+        _make_fileinfo("/tmp/b.py", loc=200, size=200, mtime="2025-01-01 00:00:00"),
+    ]
+    from to_codigo.core.scanner import compute_stats
+    stats = compute_stats(files)
+
+    diff = compare_files(files, {})
+    updated = apply_audit_to_files(files, diff)
+    audit_stats = calculate_audit_stats(updated, diff)
+
+    output = str(tmp_path / "test.xlsx")
+    XLSXReporter().generate(updated, stats, output, audit_state=True, audit_stats=audit_stats)
+
+    result = read_previous_report(output)
+    # Should only contain the 2 file paths, not summary rows.
+    assert len(result) == 2
+    assert "/tmp/a.py" in result
+    assert "/tmp/b.py" in result
+    # Summary markers should NOT appear as keys.
+    assert not any(k.startswith("Resumen") for k in result)
+    assert not any(k.startswith("===") for k in result)
+    assert not any(k.startswith("Python") for k in result)
+    assert not any(k.startswith("Archivos") for k in result)

@@ -122,13 +122,14 @@ def _read_xlsx_report(path: str) -> dict[str, dict[str, Any]]:
             continue
         fpath = row[path_idx] if path_idx < len(row) else None
         if not fpath:
+            if all(v is None or str(v).strip() == "" for v in row if v is not None):
+                break
             continue
         fpath = str(fpath).strip()
-        if not fpath or fpath.startswith("Resumen") or fpath.startswith("==="):
+        if not fpath:
             continue
-        # Skip summary rows — only accept paths that look like absolute file paths.
-        if not (fpath.startswith("/") or fpath[1:3] == ":\\" or fpath.startswith("./") or fpath.startswith("../")):
-            continue
+        if fpath.startswith("Resumen") or fpath.startswith("==="):
+            break
 
         entry: dict[str, Any] = {
             "audited": "No",
@@ -179,13 +180,14 @@ def _read_csv_report(path: str) -> dict[str, dict[str, Any]]:
 
         for row in reader:
             if not row or len(row) <= path_idx:
+                if not row or all(v.strip() == "" for v in row):
+                    break
                 continue
             fpath = row[path_idx].strip()
-            if not fpath or fpath.startswith("Resumen") or fpath.startswith("==="):
+            if not fpath:
                 continue
-            # Skip summary rows — only accept paths that look like absolute file paths.
-            if not (fpath.startswith("/") or fpath[1:3] == ":\\" or fpath.startswith("./") or fpath.startswith("../")):
-                continue
+            if fpath.startswith("Resumen") or fpath.startswith("==="):
+                break
 
             entry: dict[str, Any] = {
                 "audited": "No",
