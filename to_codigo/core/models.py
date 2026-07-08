@@ -4,11 +4,15 @@ Defines the core data structures used across the package:
 ``FileInfo`` represents a single scanned source file, ``LanguageStats``
 aggregates metrics per programming language, and ``TodoItem`` captures
 a single TODO/FIXME/HACK/NOTE marker occurrence.
+
+Audit tracking models: ``AuditEntry`` and ``AuditState`` persist which
+files have been reviewed during a security code audit.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 
 
 @dataclass(frozen=True)
@@ -30,6 +34,11 @@ class FileInfo:
         fixmes: Number of FIXME/BUG markers found.
         hacks: Number of HACK/XXX markers found.
         notes: Number of NOTE markers found.
+        audit_status: Audit status computed from previous report comparison.
+            One of: ``"Auditado"``, ``"Pendiente"``, ``"Modificado"``, ``"Nuevo"``.
+            Default ``"Pendiente"`` when no audit data is available.
+        audit_marked: What the auditor set in the previous report (``"Si"`` or ``"No"``).
+            Used as the value for the ``Auditado`` column in output reports.
     """
 
     absolute_path: str
@@ -46,6 +55,8 @@ class FileInfo:
     fixmes: int = 0
     hacks: int = 0
     notes: int = 0
+    audit_status: str = "Pendiente"
+    audit_marked: str = "No"
 
 
 @dataclass(frozen=True)
@@ -119,3 +130,136 @@ class ScanResult:
     stats: dict[str, "LanguageStats"]
     skipped_binary: int = 0
     skipped_errors: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Audit tracking models
+# ---------------------------------------------------------------------------
+
+@dataclass
+class FileChangeStatus:
+    """Describes whether a file changed since the previous report.
+
+    Attributes:
+        status: ``"Auditado"`` (audited+unchanged), ``"Pendiente"`` (unaudited+unchanged),
+            ``"Modificado"`` (file changed since last audit), or ``"Nuevo"`` (not in previous report).
+        audited: ``"Si"`` or ``"No"`` — the audit mark from the previous report.
+        previous_size: File size in bytes from the previous report.
+        previous_mtime: Modification timestamp string from the previous report.
+    """
+    status: str
+    audited: str
+    previous_size: int = 0
+    previous_mtime: str = ""
+
+
+@dataclass
+class AuditDiff:
+    """Result of comparing current scan against previous report.
+
+    Attributes:
+        audited_unchanged: Files that were ``"Si"`` and didn't change.
+        audited_modified: Files that were ``"Si"`` but the file changed.
+        pending_unchanged: Files that were ``"No"`` and didn't change.
+        new_files: Files not in previous report.
+        removed_files: Files in previous but not in current.
+        changes: Mapping of absolute path to :class:`FileChangeStatus`.
+    """
+    audited_unchanged: int = 0
+    audited_modified: int = 0
+    pending_unchanged: int = 0
+    new_files: int = 0
+    removed_files: int = 0
+    changes: dict[str, FileChangeStatus] = field(default_factory=dict)
+
+    def determine_status(
+        self,
+        filepath: str,
+        current_size: int = 0,
+        current_mtime: str = "",
+    ) -> str:
+        """Return the audit status for *filepath*.
+
+        Returns one of: ``"Auditado"``, ``"Pendiente"``, ``"Modificado"``, ``"Nuevo"``.
+        """
+        status = self.changes.get(filepath)
+        if status is None:
+            return "Nuevo"
+        return status.status
+
+
+@dataclass
+class AuditEntry:
+    """Audit state for a single file.
+
+    Attributes:
+        filepath: Absolute filesystem path (used as the key in AuditState).
+        audited: Whether this file has been marked as audited.
+        auditor: Name of the person who audited the file.
+        audit_date: Timestamp string ``YYYY-MM-DD HH:MM``.
+        notes: Free-text notes left by the auditor.
+    """
+
+    filepath: str
+    audited: bool = False
+    auditor: str = ""
+    audit_date: str = ""
+    notes: str = ""
+
+
+@dataclass
+class AuditState:
+    """Persistent audit tracking state across scans.
+
+    Attributes:
+        entries: Mapping of absolute file path to :class:`AuditEntry`.
+        last_updated: Timestamp of the last modification.
+    """
+
+    entries: dict[str, AuditEntry] = field(default_factory=dict)
+    last_updated: str = ""
+
+    def is_audited(self, filepath: str) -> bool:
+        """Return ``True`` if *filepath* is marked as audited."""
+        return self.entries.get(filepath, AuditEntry(filepath=filepath)).audited
+
+    def get_entry(self, filepath: str) -> AuditEntry:
+        """Return the :class:`AuditEntry` for *filepath* (or a default)."""
+        return self.entries.get(filepath, AuditEntry(filepath=filepath))
+
+    def mark(
+        self,
+        filepath: str,
+        audited: bool = True,
+        auditor: str = "",
+        notes: str = "",
+    ) -> None:
+        """Mark *filepath* as audited (or unaudited) with optional metadata."""
+        entry = self.entries.get(filepath, AuditEntry(filepath=filepath))
+        entry.audited = audited
+        if auditor:
+            entry.auditor = auditor
+        if notes:
+            entry.notes = notes
+        entry.audit_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+        self.entries[filepath] = entry
+        self.last_updated = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    def stats(self, files: list[FileInfo]) -> dict:
+        """Return audit statistics for a list of scanned files."""
+        total_loc = sum(f.code_lines for f in files)
+        audited_files = [f for f in files if self.is_audited(f.absolute_path)]
+        audited_loc = sum(f.code_lines for f in audited_files)
+        unaudited_loc = total_loc - audited_loc
+        return {
+            "total_files": len(files),
+            "audited_files": len(audited_files),
+            "unaudited_files": len(files) - len(audited_files),
+            "total_loc": total_loc,
+            "audited_loc": audited_loc,
+            "unaudited_loc": unaudited_loc,
+            "pct_audited": (audited_loc / total_loc * 100) if total_loc > 0 else 0,
+            "pct_files_audited": (
+                len(audited_files) / len(files) * 100 if files else 0
+            ),
+        }

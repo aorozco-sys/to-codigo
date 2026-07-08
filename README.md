@@ -33,6 +33,7 @@
 - **Shell Completion** — Genera scripts de autocompletado para bash, zsh y fish.
 - **Multiprocessing** — Procesamiento paralelo con `ProcessPoolExecutor` para escanear repositorios grandes rápidamente.
 - **5 formatos de salida** — CSV, Excel (XLSX), JSON, HTML Dashboard y Markdown.
+- **Audit Tracking** — Modo de seguimiento de auditoría donde **el Excel es la fuente de verdad**. El auditor marca archivos directamente en el Excel con dropdowns (Si/No). La herramienta detecta archivos modificados (por tamaño + fecha) entre escaneos y señala cuáles necesitan re-auditoría. Estados: Auditado, Pendiente, Modificado, Nuevo.
 - **Soporte .gitignore** — Respeta tus reglas de gitignore cuando lo necesites.
 - **Detección por shebang** — Identifica scripts sin extensión (`#!/usr/bin/env python3`).
 - **CLI con Rich UX** — Banner ASCII, barra de progreso, tabla de resultados con colores.
@@ -88,6 +89,7 @@ to-codigo --completion bash > /etc/bash_completion.d/to-codigo
 - **Shell Completion** — Generate completion scripts for bash, zsh and fish.
 - **Multiprocessing** — Parallel processing via `ProcessPoolExecutor` for fast scanning of large repos.
 - **5 output formats** — CSV, Excel (XLSX), JSON, HTML Dashboard and Markdown.
+- **Audit Tracking** — Security audit mode where **Excel is the source of truth**. The auditor marks files directly in the Excel using dropdowns (Si/No). The tool detects modified files (by size + mtime) between scans and flags which ones need re-auditing. States: Auditado, Pendiente, Modificado, Nuevo.
 - **.gitignore support** — Honors your gitignore rules when needed.
 - **Shebang detection** — Identifies extensionless scripts (`#!/usr/bin/env python3`).
 - **Rich CLI UX** — ASCII banner, progress bar, color-coded results table.
@@ -147,17 +149,23 @@ to-codigo --completion zsh >> ~/.zshrc
 | `--verbose` | Mostrar warnings de archivos omitidos | Off |
 | `--no-banner` | Omitir el banner ASCII | Show banner |
 | `--version` | Mostrar version | — |
+| `--audit` | Habilitar modo de seguimiento de auditoria (Excel como estado) | Off |
 
 ## Output Formats
 
 ### CSV
-Reporte RFC 4180 con una fila por archivo (incluye columnas TODOs y FIXMEs) + sección de resumen por lenguaje al final.
+Reporte RFC 4180 con una fila por archivo (incluye columnas TODOs y FIXMEs) + sección de resumen por lenguaje al final. Con `--audit`, añade columnas `Auditado` y `Estado` y una sección `Resumen de Auditoria` al final.
 
 ### XLSX
-Excel con headers estilizados (azul), auto-filtro, filas congeladas, y sección de resumen (naranja) con totales por lenguaje. Incluye columnas TODOs y FIXMEs. Requiere `openpyxl`.
+Excel con headers estilizados (azul), auto-filtro, filas congeladas, y sección de resumen (naranja) con totales por lenguaje. Incluye columnas TODOs y FIXMEs. Con `--audit`, añade:
+- Columna `Auditado` con **data validation dropdown** (Si/No) — el auditor hace clic y selecciona
+- Columna `Estado` (Auditado / Pendiente / Modificado / Nuevo) — solo lectura
+- **Conditional formatting**: verde (Auditado), amarillo (Modificado), azul (Nuevo)
+- Sección `Resumen de Auditoria` con conteos y LOC por estado
+- Requiere `openpyxl`.
 
 ### JSON
-JSON estructurado con array `files` (detalle por archivo con campos todos/fixmes/hacks/notes) y objeto `summary` (totales por lenguaje). Incluye timestamp de generación.
+JSON estructurado con array `files` (detalle por archivo con campos todos/fixmes/hacks/notes) y objeto `summary` (totales por lenguaje). Incluye timestamp de generación. Con `--audit`, cada archivo incluye `audit_status` y `audit_marked`, y se añade `audit_summary` a nivel raíz.
 
 ### HTML Dashboard
 Dashboard HTML autocontenido (sin dependencias externas, funciona offline). Incluye:
@@ -177,13 +185,71 @@ to-codigo . --format html -o dashboard
 # Genera dashboard.html — ábrelo en cualquier navegador
 ```
 
+Con `--audit`, el dashboard incluye además:
+- **Barra de progreso de auditoría** con % auditado (LOC)
+- **Tarjetas de auditoría**: Auditados, Modificados, Nuevos, Pendientes, % Progreso
+- **Columna de checkboxes** interactiva en la tabla (clic para marcar/desmarcar)
+- **Columna Estado** con badges de colores: Auditado (verde ✓), Pendiente (gris), Modificado (naranja ⚠), Nuevo (azul +)
+- **Botones de filtro**: Todos / Auditados / Modificados / Nuevos / Pendientes
+- **Exportar a Excel** (descarga CSV con estado actual)
+- **Auto-save** en localStorage con indicador "Guardado ✓"
+- **Actualización en tiempo real** de progreso al marcar checkboxes
+
 ### Markdown
-Reporte `.md` con tablas GitHub-flavored, sección de top 10 archivos y sección de deuda técnica.
+Reporte `.md` con tablas GitHub-flavored, sección de top 10 archivos y sección de deuda técnica. Con `--audit`, añade columna `Auditado` (✓/✗) y sección `Audit Summary`.
 
 ```bash
 to-codigo . --format md -o report
 # Genera report.md — pégalo en cualquier README, issue o wiki
 ```
+
+---
+
+## Audit Tracking
+
+El modo de auditoría permite a los auditores de seguridad rastrear qué archivos han sido revisados durante una auditoría de código. **El Excel/CSV/JSON es la fuente de verdad** — no hay archivo de estado separado.
+
+### Flujo de trabajo
+
+```bash
+# 1. Primera ejecución: genera Excel con columnas Auditado (todas "No") y Estado (todas "Nuevo")
+to-codigo ./project --audit --format xlsx -o reporte
+
+# 2. El auditor abre el Excel, marca "Auditado = Si" en los archivos revisados, guarda y cierra
+
+# 3. Segunda ejecución: la herramienta detecta el Excel anterior
+to-codigo ./project --audit --format xlsx -o reporte
+
+# La herramienta compara tamaño + fecha de modificación de cada archivo contra el reporte anterior:
+# - Auditado: marcado "Si" Y sin cambios → mantiene la marca
+# - Pendiente: marcado "No" Y sin cambios → sigue pendiente
+# - Modificado: marcado "Si" PERO el archivo cambió → RESET a "No" (¡re-auditar!)
+# - Nuevo: archivo no estaba en el reporte anterior
+```
+
+### Detección de cambios
+
+```
+                          Detección de Cambios
+╭──────────────────────────────────┬────────────┬───────────────────────────────╮
+│ Estado                           │   Cantidad │ Detalle                       │
+├──────────────────────────────────┼────────────┼───────────────────────────────┤
+│ Auditados sin cambios            │        450 │ ████████████░░░░░░  15.4%     │
+│ Archivos modificados (Alerta!)   │         23 │ Requieren re-auditoría        │
+│ Archivos nuevos                  │         67 │ Sin auditar                   │
+│ Archivos pendientes              │      2,381 │ Sin auditar                   │
+│ Archivos eliminados              │         12 │ Ya no existen                 │
+╰──────────────────────────────────┴────────────┴───────────────────────────────╯
+```
+
+### Estados de auditoría
+
+| Estado | Descripción | Color en Excel | Marca Auditado |
+|--------|-------------|----------------|----------------|
+| **Auditado** | Revisado y sin cambios desde el último escaneo | Verde claro | Si |
+| **Pendiente** | No revisado y sin cambios | Default | No |
+| **Modificado** | Fue revisado PERO el archivo cambió (necesita re-auditoría) | Amarillo claro | No (reset) |
+| **Nuevo** | No estaba en el reporte anterior | Azul claro | No |
 
 ---
 

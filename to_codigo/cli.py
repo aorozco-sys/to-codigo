@@ -371,6 +371,95 @@ def create_progress_bar() -> Progress:
     )
 
 
+def show_audit_progress(
+    audit_stats: dict,
+    console: Console | None = None,
+) -> None:
+    """Render a Rich table with audit progress (report-as-source-of-truth mode).
+
+    Shows audited/modified/new/pending counts and LOC with progress bars.
+    """
+    c = console or Console()
+
+    pct_files = audit_stats.get("pct_files_audited", 0)
+    pct_loc = audit_stats.get("pct_audited", 0)
+
+    def _bar(pct: float, width: int = 28) -> str:
+        filled = int(pct / 100 * width)
+        return "\u2588" * filled + "\u2591" * (width - filled)
+
+    # --- Change detection table ---
+    table = Table(
+        title="[bold yellow]Deteccion de Cambios[/]",
+        show_lines=False,
+        box=box.ROUNDED,
+        title_style="bold yellow",
+    )
+    table.add_column("Estado", style="bold white", min_width=32)
+    table.add_column("Cantidad", justify="right", style="cyan", min_width=10)
+    table.add_column("Detalle", min_width=30)
+
+    table.add_row(
+        "Auditados sin cambios",
+        str(audit_stats.get("audited_files", 0)),
+        f'{_bar(pct_files)}  {pct_files:.1f}%',
+    )
+    table.add_row(
+        "Archivos modificados (Alerta!)",
+        str(audit_stats.get("modified_files", 0)),
+        Text("Requieren re-auditoria", style="bold yellow") if audit_stats.get("modified_files", 0) > 0 else "Sin cambios",
+    )
+    table.add_row(
+        "Archivos nuevos",
+        str(audit_stats.get("new_files", 0)),
+        "Sin auditar",
+    )
+    table.add_row(
+        "Archivos pendientes",
+        str(audit_stats.get("pending_files", 0)),
+        "Sin auditar",
+    )
+    table.add_row(
+        "Archivos eliminados",
+        str(audit_stats.get("removed_files", 0)),
+        "Ya no existen",
+    )
+
+    c.print()
+    c.print(table)
+
+    # --- Audit progress table ---
+    table2 = Table(
+        title="[bold green]Progreso de Auditoria[/]",
+        show_lines=False,
+        box=box.ROUNDED,
+        title_style="bold green",
+    )
+    table2.add_column("Metrica", style="bold white", min_width=22)
+    table2.add_column("Valor", justify="right", style="cyan", min_width=12)
+    table2.add_column("Progreso", min_width=36)
+
+    table2.add_row(
+        "Lineas Auditadas",
+        f'{audit_stats.get("audited_loc", 0):,}',
+        f'{_bar(pct_loc)}  {pct_loc:.1f}%',
+    )
+    table2.add_row(
+        "Lineas Sin Auditar",
+        f'{audit_stats.get("total_loc", 0) - audit_stats.get("audited_loc", 0):,}',
+        "",
+    )
+    table2.add_row(
+        "Progreso Total",
+        f"{pct_loc:.1f}%",
+        f'{_bar(pct_loc, 36)}',
+    )
+
+    c.print()
+    c.print(table2)
+    c.print()
+
+
 def show_help_examples(console: Console | None = None) -> None:
     """Render formatted examples section for --help output."""
     c = console or Console()

@@ -34,6 +34,7 @@ from to_codigo.cli import (
     show_success,
     create_progress_bar,
     show_help_examples,
+    show_audit_progress,
 )
 from to_codigo.assets.banner import VERSION
 from to_codigo.core.scanner import scan_directory, compute_stats, _collect_files, _load_gitignore
@@ -41,6 +42,12 @@ from to_codigo.core.scanner import DEFAULT_EXCLUDE_DIRS, _process_file, is_binar
 from to_codigo.core.reporter import REPORTERS
 from to_codigo.core.differ import diff_reports
 from to_codigo.core.models import FileInfo
+from to_codigo.core.audit import (
+    read_previous_report,
+    compare_files,
+    calculate_audit_stats,
+    apply_audit_to_files,
+)
 
 console = Console()
 
@@ -268,6 +275,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="version",
         version=f"to-codigo v{VERSION}",
     )
+    # --- Audit tracking ---
+    parser.add_argument(
+        "--audit",
+        action="store_true",
+        default=False,
+        help="Habilitar modo de seguimiento de auditoria (Excel/CSV/JSON es el estado)",
+    )
     return parser
 
 
@@ -400,6 +414,41 @@ def main(argv: list[str] | None = None) -> int:
     # --- Results table ---
     show_results_table(stats, len(results), elapsed, console, skipped_binary=skipped_binary)
 
+    # --- Determine output file path ---
+    output_file = f"{args.output}.{args.format}"
+
+    # --- Audit: report-as-source-of-truth ---
+    audit_stats: dict | None = None
+    if args.audit:
+        previous_data: dict[str, dict] = {}
+        has_previous = os.path.isfile(output_file)
+
+        if has_previous:
+            console.print(f"\n[bold yellow]Reporte anterior detectado:[/] {output_file}")
+            console.print("[dim]Comparando cambios...[/]")
+            previous_data = read_previous_report(output_file)
+
+        audit_diff = compare_files(results, previous_data)
+        results = apply_audit_to_files(results, audit_diff)
+        audit_stats = calculate_audit_stats(results, audit_diff)
+
+        if has_previous:
+            console.print(
+                f"  [green]- {audit_diff.audited_unchanged} archivos auditados sin cambios[/]"
+            )
+            if audit_diff.audited_modified > 0:
+                console.print(
+                    f"  [yellow]- {audit_diff.audited_modified} archivos modificados (necesitan re-auditoria)[/]"
+                )
+            else:
+                console.print(f"  [dim]- {audit_diff.audited_modified} archivos modificados[/]")
+            console.print(f"  [cyan]- {audit_diff.new_files} archivos nuevos[/]")
+            console.print(f"  [red]- {audit_diff.removed_files} archivos eliminados[/]\n")
+        else:
+            console.print(f"\n[dim]Primera auditoria: {len(results)} archivos (todos nuevos)[/]\n")
+
+        show_audit_progress(audit_stats, console)
+
     # --- Top files ---
     if args.top > 0:
         show_top_files_table(results, args.top, console)
@@ -437,9 +486,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    output_file = f"{args.output}.{args.format}"
     try:
-        reporter_cls().generate(results, stats, output_file)
+        reporter_cls().generate(
+            results, stats, output_file,
+            audit_state=args.audit,
+            audit_stats=audit_stats,
+        )
     except Exception as e:
         show_error(
             f"Error generando reporte: {e}",
@@ -448,6 +500,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     show_success(f"Reporte generado: {output_file}", console)
+
     return 0
 
 
