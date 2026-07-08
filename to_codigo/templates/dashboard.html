@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>to-codigo Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#1a1b26;color:#a9b1d6;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;padding:20px;min-height:100vh}
+.banner-block{background:#16161e;border-radius:12px;padding:24px;margin-bottom:24px;border:1px solid #2a2e3f}
+.banner-block pre{color:#7dcfff;font-size:13px;line-height:1.3;font-family:'Menlo','Consolas','Courier New',monospace}
+.banner-block .version{color:#9ece6a;font-size:14px;margin-top:8px;font-family:'Menlo','Consolas','Courier New',monospace}
+h2{color:#7dcfff;margin-bottom:16px;font-size:20px;border-bottom:2px solid #2a2e3f;padding-bottom:8px}
+h3{color:#9ece6a;margin-bottom:12px;font-size:16px}
+.container{max-width:1200px;margin:0 auto}
+
+/* Summary Cards */
+.cards{display:flex;flex-wrap:wrap;gap:16px;margin-bottom:32px}
+.card{flex:1;min-width:200px;background:#16161e;border-radius:12px;padding:24px;text-align:center;border:1px solid #2a2e3f;transition:transform .2s}
+.card:hover{transform:translateY(-4px)}
+.card .label{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#565f89;margin-bottom:8px}
+.card .value{font-size:32px;font-weight:bold}
+.card-cyan .value{color:#7dcfff}
+.card-green .value{color:#9ece6a}
+.card-orange .value{color:#ff9e64}
+.card-red .value{color:#f7768e}
+
+/* Bar Chart */
+.section{background:#16161e;border-radius:12px;padding:24px;margin-bottom:24px;border:1px solid #2a2e3f}
+.bar-row{display:flex;align-items:center;margin-bottom:10px}
+.bar-label{width:120px;font-size:13px;color:#7aa2f7;text-align:right;padding-right:12px;flex-shrink:0}
+.bar-track{flex:1;height:28px;background:#1a1b26;border-radius:6px;overflow:hidden;position:relative}
+.bar-fill{height:100%;border-radius:6px;transition:width .3s;display:flex;align-items:center;padding-left:8px;font-size:12px;font-weight:bold;color:#1a1b26;min-width:2px}
+.bar-value{position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:12px;color:#a9b1d6}
+
+/* Pie Chart */
+.charts-row{display:flex;flex-wrap:wrap;gap:24px}
+.chart-container{flex:1;min-width:300px}
+.pie-wrapper{display:flex;align-items:center;justify-content:center;padding:20px}
+.pie-legend{margin-top:16px}
+.legend-item{display:flex;align-items:center;margin-bottom:6px;font-size:13px}
+.legend-color{width:14px;height:14px;border-radius:3px;margin-right:8px;flex-shrink:0}
+.legend-label{flex:1;color:#a9b1d6}
+.legend-value{color:#565f89;margin-left:8px}
+
+/* Table */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:#1a1b26;color:#7dcfff;padding:10px 12px;text-align:left;cursor:pointer;user-select:none;white-space:nowrap;border-bottom:2px solid #2a2e3f}
+th:hover{color:#9ece6a}
+th .sort-arrow{font-size:10px;margin-left:4px;opacity:.5}
+th.sorted-asc .sort-arrow{opacity:1;color:#9ece6a}
+th.sorted-desc .sort-arrow{opacity:1;color:#f7768e}
+td{padding:8px 12px;border-bottom:1px solid #1f2335;color:#a9b1d6}
+tr:hover td{background:#1a1b26}
+.lang-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold}
+
+/* Top Files */
+.top-file{display:flex;align-items:center;padding:10px 12px;background:#1a1b26;border-radius:8px;margin-bottom:8px;border-left:3px solid #7dcfff}
+.top-rank{width:28px;height:28px;border-radius:50%;background:#2a2e3f;display:flex;align-items:center;justify-content:center;font-weight:bold;color:#7dcfff;font-size:13px;margin-right:12px;flex-shrink:0}
+.top-info{flex:1}
+.top-name{font-size:13px;color:#c0caf5}
+.top-lang{font-size:11px;color:#565f89}
+.top-loc{font-weight:bold;color:#9ece6a;font-size:15px;flex-shrink:0;margin-left:12px}
+
+/* Tech Debt */
+.debt-item{background:#1a1b26;border-radius:8px;padding:12px 16px;margin-bottom:8px;border-left:3px solid #ff9e64}
+.debt-header{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.debt-marker{padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold;color:#16161e}
+.debt-file{font-size:12px;color:#7aa2f7}
+.debt-line{font-size:11px;color:#565f89}
+.debt-text{font-size:13px;color:#a9b1d6;margin-top:4px}
+.no-data{text-align:center;padding:40px;color:#565f89;font-style:italic}
+
+/* Footer */
+.footer{text-align:center;padding:24px;color:#565f89;font-size:12px}
+
+/* Responsive */
+@media(max-width:768px){
+    .cards{flex-direction:column}
+    .charts-row{flex-direction:column}
+    .bar-label{width:80px;font-size:11px}
+    th,td{padding:6px 8px;font-size:12px}
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- Banner -->
+<div class="banner-block">
+<pre>{{BANNER}}</pre>
+<div class="version">v{{VERSION}} - Code Analyzer &amp; Inventory Tool</div>
+</div>
+
+<!-- Summary Cards -->
+<div class="cards">
+<div class="card card-cyan"><div class="label">Total Files</div><div class="value">{{TOTAL_FILES}}</div></div>
+<div class="card card-green"><div class="label">Total LOC</div><div class="value">{{TOTAL_LOC}}</div></div>
+<div class="card card-orange"><div class="label">Total Comments</div><div class="value">{{TOTAL_COMMENTS}}</div></div>
+<div class="card card-red"><div class="label">Languages</div><div class="value">{{LANGUAGES_COUNT}}</div></div>
+</div>
+
+<!-- Bar Chart -->
+<div class="section">
+<h2>LOC by Language</h2>
+<div id="bar-chart">{{BAR_CHART_HTML}}</div>
+</div>
+
+<!-- Pie Chart -->
+<div class="section">
+<h2>File Distribution by Language</h2>
+<div class="charts-row">
+<div class="pie-wrapper">{{PIE_CHART_SVG}}</div>
+<div class="pie-legend">{{PIE_LEGEND_HTML}}</div>
+</div>
+</div>
+
+<!-- Detailed Table -->
+<div class="section">
+<h2>Detailed Breakdown</h2>
+<table id="detail-table">
+<thead>
+<tr>
+<th data-col="filename" data-type="str">File<span class="sort-arrow">&#9650;&#9660;</span></th>
+<th data-col="language" data-type="str">Language<span class="sort-arrow">&#9650;&#9660;</span></th>
+<th data-col="code_lines" data-type="num">LOC<span class="sort-arrow">&#9650;&#9660;</span></th>
+<th data-col="comment_lines" data-type="num">Comments<span class="sort-arrow">&#9650;&#9660;</span></th>
+<th data-col="blank_lines" data-type="num">Blank<span class="sort-arrow">&#9650;&#9660;</span></th>
+<th data-col="total_lines" data-type="num">Total<span class="sort-arrow">&#9650;&#9660;</span></th>
+</tr>
+</thead>
+<tbody>{{TABLE_ROWS_HTML}}
+</tbody>
+</table>
+</div>
+
+<!-- Top 10 Files -->
+<div class="section">
+<h2>Top 10 Files by LOC</h2>
+<div id="top-files">{{TOP_FILES_HTML}}</div>
+</div>
+
+<!-- Tech Debt -->
+<div class="section">
+<h2>Tech Debt - TODOs / FIXMEs / HACKs</h2>
+<div id="tech-debt">{{TECH_DEBT_HTML}}</div>
+</div>
+
+<!-- Footer -->
+<div class="footer">
+Generated by <strong style="color:#7dcfff">to-codigo</strong> v{{VERSION}} &mdash; {{TIMESTAMP}}
+</div>
+
+</div>
+
+<script>
+document.querySelectorAll('#detail-table th').forEach(function(th){
+th.addEventListener('click',function(){
+var table=th.closest('table');
+var tbody=table.querySelector('tbody');
+var rows=Array.from(tbody.querySelectorAll('tr'));
+var colIdx=th.cellIndex;
+var type=th.dataset.type;
+var isAsc=th.classList.contains('sorted-asc');
+table.querySelectorAll('th').forEach(function(h){h.classList.remove('sorted-asc','sorted-desc')});
+th.classList.add(isAsc?'sorted-desc':'sorted-asc');
+rows.sort(function(a,b){
+var va=a.cells[colIdx].dataset.val||a.cells[colIdx].textContent.trim();
+var vb=b.cells[colIdx].dataset.val||b.cells[colIdx].textContent.trim();
+if(type==='num'){va=parseFloat(va)||0;vb=parseFloat(vb)||0}
+else{va=va.toLowerCase();vb=vb.toLowerCase()}
+if(va<vb)return isAsc?1:-1;
+if(va>vb)return isAsc?-1:1;
+return 0;
+});
+rows.forEach(function(r){tbody.appendChild(r)});
+});
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "to-codigo"
+version = "1.0.0"
+description = "Analizador de codigo e inventario de proyectos con metricas detalladas"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Audithor"}]
+requires-python = ">=3.10"
+dependencies = [
+    "openpyxl>=3.1",
+    "rich>=13.0",
+    "pyfiglet>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-cov>=7.0"]
+
+[project.scripts]
+to-codigo = "to_codigo.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["to_codigo*"]
+
+[tool.setuptools.package-data]
+to_codigo = ["templates/*.html"]
